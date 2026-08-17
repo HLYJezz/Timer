@@ -1,0 +1,13 @@
+# One-click deploy on Render (free tier is enough for a camp).
+# 1. push this repo to GitHub
+# 2. render.com → New → Blueprint → pick the repo
+services:
+  - type: web
+    name: basetimer
+    runtime: node
+    plan: free
+    buildCommand: "echo no build step"
+    startCommand: "node server.js"
+    envVars:
+      - key: ADMIN_PIN
+        sync: false # set your own PIN in the Render dashboard (optional)

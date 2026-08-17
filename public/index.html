@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ฐานเวลา · ตัวจับเวลาฐานกิจกรรม</title>
+<meta name="theme-color" content="#0e1117">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⏱</text></svg>">
+</head>
+<body>
+
+<div class="topbar">
+  <h1>⏱ ฐานเวลา</h1>
+  <span class="spacer"></span>
+  <span class="conn" id="conn"></span>
+</div>
+
+<div class="wrap">
+  <p class="muted">เปิดหน้าที่ตรงกับหน้าที่ของคุณ ทุกคนเห็นเวลาเดียวกันแบบสด ๆ ไม่ต้องวิ่งไปถามฐานอื่นอีก</p>
+
+  <div class="card">
+    <h2>ฉันเป็น…</h2>
+    <div class="row" style="flex-direction:column">
+      <a class="btn btn-primary btn-lg btn-block" href="station.html">
+        🧑‍🏫 พี่ประจำฐาน — กดเริ่ม/จบเวลาฐานตัวเอง
+      </a>
+      <a class="btn btn-info btn-lg btn-block" href="board.html">
+        📺 จอรวม — ดูทุกฐานพร้อมกัน (ฝ่ายกลาง / จอใหญ่)
+      </a>
+      <a class="btn btn-lg btn-block" href="admin.html">
+        ⚙️ ตั้งค่า &amp; สั่งงานรอบ
+      </a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>ใช้ยังไง (3 ขั้น)</h2>
+    <ol class="muted" style="line-height:1.9;padding-left:20px;margin:0">
+      <li>ฝ่ายกลางเข้า <b>ตั้งค่า</b> ใส่ชื่อฐาน เวลาแต่ละฐาน และรายชื่อกลุ่ม</li>
+      <li>พี่ประจำฐานเปิด <b>พี่ประจำฐาน</b> บนมือถือ เลือกฐานของตัวเอง แล้วกด <b>เริ่มจับเวลา</b> เมื่อกลุ่มมาถึง</li>
+      <li>ฝ่ายกลางเปิด <b>จอรวม</b> ทิ้งไว้ — ฐานไหนเกินเวลาจะเป็นสีแดงพร้อมบอกว่าช้ากี่นาที</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>สิ่งที่แก้ปัญหา “ไม่รู้ว่าฐานไหนช้า”</h2>
+    <ul class="muted" style="line-height:1.9;padding-left:20px;margin:0">
+      <li><b>สีแดง + ตัวเลขติดลบ</b> บอกทันทีว่าฐานไหนเกินเวลาไปกี่นาที</li>
+      <li><b>ช้าที่สุดตอนนี้</b> ขึ้นบนหัวจอ ฝ่ายกลางรู้เลยว่าต้องไปช่วยฐานไหน</li>
+      <li><b>ปุ่ม 🆘</b> ให้พี่ประจำฐานเรียกฝ่ายกลางโดยไม่ต้องโทร</li>
+      <li><b>ช่องข้อความ</b> เช่น “กลุ่มมาช้า 5 นาที” เด้งขึ้นจอรวมทันที</li>
+      <li><b>เสียงเตือน</b> เหลือ 5 นาที / 1 นาที / หมดเวลา</li>
+      <li><b>เน็ตหลุดก็ยังจับเวลาต่อได้</b> แล้วค่อยกลับมาซิงก์เอง</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>ลิงก์สำหรับส่งให้ทีม</h2>
+    <div class="row">
+      <input id="shareUrl" readonly>
+      <button id="copyBtn" style="flex:0 0 auto">คัดลอก</button>
+    </div>
+    <p class="muted small" style="margin-bottom:0">ทุกเครื่องต้องต่อ Wi-Fi วงเดียวกับเครื่องที่รันเซิร์ฟเวอร์ (หรือใช้ลิงก์ที่ deploy ขึ้นเน็ตแล้ว)</p>
+  </div>
+</div>
+
+<script src="firebase-config.js"></script>
+<script src="reducer.js"></script>
+<script src="sync-firebase.js"></script>
+<script src="app.js"></script>
+<script>
+(function () {
+  UI.bindConn(document.getElementById('conn'));
+  var url = location.origin + location.pathname.replace(/index\.html$/, '');
+  document.getElementById('shareUrl').value = url;
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    navigator.clipboard.writeText(url).then(function () { UI.toast('คัดลอกแล้ว'); },
+      function () { UI.toast('คัดลอกไม่ได้ — ก๊อปเอง'); });
+  });
+  Store.start();
+})();
+</script>
+</body>
+</html>

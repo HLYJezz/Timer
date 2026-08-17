@@ -1,0 +1,15 @@
+{
+  "name": "basetimer",
+  "version": "1.0.0",
+  "description": "ฐานเวลา — live shared countdown board for camp activity stations (ฐานกิจกรรม)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true,
+  "license": "MIT"
+}

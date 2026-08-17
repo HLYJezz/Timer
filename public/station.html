@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ฐานของฉัน · ฐานเวลา</title>
+<meta name="theme-color" content="#0e1117">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⏱</text></svg>">
+</head>
+<body>
+
+<div class="topbar">
+  <h1 id="title">ฐานของฉัน</h1>
+  <span class="round-pill" id="roundPill">รอบที่ 1</span>
+  <span class="spacer"></span>
+  <span class="conn" id="conn"></span>
+  <button id="switchBtn">เปลี่ยนฐาน</button>
+  <a class="btn" href="board.html">จอรวม</a>
+</div>
+
+<div class="wrap">
+  <div id="announce"></div>
+
+  <!-- station picker -->
+  <div class="card" id="picker" hidden>
+    <h2>เลือกฐานที่คุณดูแล</h2>
+    <div id="pickerList" class="row" style="flex-direction:column"></div>
+  </div>
+
+  <!-- main control -->
+  <div id="panel" hidden>
+    <div class="card" id="clockCard">
+      <div class="muted" id="groupLine" style="text-align:center"></div>
+      <div class="bigclock" id="clock">--:--</div>
+      <div class="bigstate" id="stateLine">ยังไม่เริ่ม</div>
+      <div class="bar" style="height:8px;border-radius:4px;background:var(--panel-2);overflow:hidden">
+        <i id="bar" style="display:block;height:100%;width:0;background:var(--ok)"></i>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <button class="btn-primary btn-lg btn-block" id="mainBtn">▶ เริ่มจับเวลา</button>
+      </div>
+      <div class="grid-2" style="margin-bottom:10px">
+        <button id="pauseBtn">⏸ หยุดพัก</button>
+        <button id="extendBtn">+5 นาที</button>
+      </div>
+      <div class="grid-2">
+        <button class="btn-help" id="helpBtn">🆘 ขอความช่วยเหลือ</button>
+        <button id="resetBtn">↺ รีเซ็ตฐานนี้</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <label for="note">บอกฝ่ายกลางว่าเกิดอะไรขึ้น (เห็นบนจอรวม)</label>
+      <div class="row">
+        <input id="note" placeholder="เช่น กลุ่มมาช้า 5 นาที / อุปกรณ์มีปัญหา" maxlength="120" style="flex:3 1 200px">
+        <button id="noteBtn" style="flex:0 0 auto">ส่ง</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="small" data-quick="กลุ่มมาถึงช้า">กลุ่มมาถึงช้า</button>
+        <button class="small" data-quick="ขอเวลาเพิ่ม">ขอเวลาเพิ่ม</button>
+        <button class="small" data-quick="พร้อมส่งกลุ่มต่อ">พร้อมส่งกลุ่มต่อ</button>
+        <button class="small" data-quick="">ล้างข้อความ</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>ฐานอื่น ๆ ตอนนี้</h2>
+      <ul class="list" id="others"></ul>
+    </div>
+  </div>
+</div>
+
+<script src="firebase-config.js"></script>
+<script src="reducer.js"></script>
+<script src="sync-firebase.js"></script>
+<script src="app.js"></script>
+<script>
+(function () {
+  'use strict';
+  var R = window.Reducer;
+  var KEY = 'basetimer.myStation';
+  var myId = new URLSearchParams(location.search).get('id') || localStorage.getItem(KEY) || '';
+  var alerted = {};       // one-shot flags per run
+  var lastStatus = null;
+
+  var el = {
+    picker: document.getElementById('picker'),
+    pickerList: document.getElementById('pickerList'),
+    panel: document.getElementById('panel'),
+    title: document.getElementById('title'),
+    roundPill: document.getElementById('roundPill'),
+    groupLine: document.getElementById('groupLine'),
+    clock: document.getElementById('clock'),
+    clockCard: document.getElementById('clockCard'),
+    stateLine: document.getElementById('stateLine'),
+    bar: document.getElementById('bar'),
+    mainBtn: document.getElementById('mainBtn'),
+    pauseBtn: document.getElementById('pauseBtn'),
+    extendBtn: document.getElementById('extendBtn'),
+    helpBtn: document.getElementById('helpBtn'),
+    resetBtn: document.getElementById('resetBtn'),
+    note: document.getElementById('note'),
+    others: document.getElementById('others'),
+    announce: document.getElementById('announce')
+  };
+
+  UI.bindConn(document.getElementById('conn'));
+  UI.keepAwake();
+  document.addEventListener('click', UI.unlockAudio, { once: true });
+
+  function me() {
+    return Store.state ? R.find(Store.state, myId) : null;
+  }
+
+  function act(action) {
+    action.id = myId;
+    return Store.send(action).catch(function (e) { UI.toast(e.message); });
+  }
+
+  document.getElementById('switchBtn').addEventListener('click', function () {
+    myId = '';
+    localStorage.removeItem(KEY);
+    render();
+  });
+
+  el.mainBtn.addEventListener('click', function () {
+    var st = me();
+    if (!st) return;
+    UI.unlockAudio();
+    if (st.status === 'idle') { alerted = {}; act({ type: 'station/start' }); }
+    else if (st.status === 'paused') act({ type: 'station/resume' });
+    else if (st.status === 'done') act({ type: 'station/start' });
+    else act({ type: 'station/finish' });
+  });
+
+  el.pauseBtn.addEventListener('click', function () {
+    var st = me();
+    if (!st) return;
+    act({ type: st.status === 'paused' ? 'station/resume' : 'station/pause' });
+  });
+
+  el.extendBtn.addEventListener('click', function () {
+    act({ type: 'station/extend', minutes: 5 });
+    UI.toast('เพิ่มเวลา 5 นาที — ฝ่ายกลางเห็นแล้ว');
+  });
+
+  el.helpBtn.addEventListener('click', function () {
+    var st = me();
+    if (!st) return;
+    act({ type: 'station/help', on: !st.help });
+  });
+
+  el.resetBtn.addEventListener('click', function () {
+    if (confirm('รีเซ็ตเวลาของฐานนี้กลับไปเริ่มใหม่?')) {
+      alerted = {};
+      act({ type: 'station/reset' });
+    }
+  });
+
+  document.getElementById('noteBtn').addEventListener('click', function () {
+    act({ type: 'station/note', text: el.note.value });
+    UI.toast('ส่งข้อความแล้ว');
+  });
+
+  document.querySelectorAll('[data-quick]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      el.note.value = b.dataset.quick;
+      act({ type: 'station/note', text: b.dataset.quick });
+    });
+  });
+
+  function renderPicker(state) {
+    el.pickerList.innerHTML = '';
+    state.stations.forEach(function (st, i) {
+      var b = document.createElement('button');
+      b.className = 'btn-block';
+      b.style.justifyContent = 'space-between';
+      b.innerHTML = '<span>' + escapeHtml(st.name) + '</span><span class="muted small">' +
+        st.durationMin + ' นาที · ' + escapeHtml(R.groupAt(state, i)) + '</span>';
+      b.addEventListener('click', function () {
+        myId = st.id;
+        localStorage.setItem(KEY, myId);
+        render();
+      });
+      el.pickerList.appendChild(b);
+    });
+  }
+
+  var pickerSig = null;
+
+  function render() {
+    var state = Store.state;
+    if (!state) return;
+    var st = me();
+    el.roundPill.textContent = 'รอบที่ ' + state.round;
+
+    var annHtml = state.announcement && state.announcement.text
+      ? '<div class="banner banner-info">📢 ' + escapeHtml(state.announcement.text) + '</div>'
+      : '';
+    if (annHtml !== el.announce.innerHTML) el.announce.innerHTML = annHtml;
+
+    if (!st) {
+      el.picker.hidden = false;
+      el.panel.hidden = true;
+      el.title.textContent = 'เลือกฐาน';
+      // Rebuilding the buttons on every tick would swallow taps mid-click.
+      var sig = state.round + '|' + state.stations.map(function (s) {
+        return s.id + ':' + s.name + ':' + s.durationMin;
+      }).join(',');
+      if (sig !== pickerSig) {
+        pickerSig = sig;
+        renderPicker(state);
+      }
+      return;
+    }
+    pickerSig = null;
+    el.picker.hidden = true;
+    el.panel.hidden = false;
+    el.title.textContent = st.name;
+  }
+
+  function paint(now) {
+    var state = Store.state;
+    if (!state) return;
+    render();
+    var st = me();
+    if (!st) return;
+
+    var idx = state.stations.indexOf(st);
+    var rem = R.remainingSec(st, now);
+    var phase = UI.phase(st, now);
+
+    el.groupLine.textContent = 'ตอนนี้: ' + R.groupAt(state, idx) +
+      ' · กำหนด ' + (st.durationMin + st.extendMin) + ' นาที' +
+      (st.extendMin ? ' (+' + st.extendMin + ')' : '');
+
+    el.clock.textContent = UI.clockText(st, now);
+    el.clock.style.color = phase === 'late' ? 'var(--late)'
+      : phase === 'warn' ? 'var(--warn)'
+      : phase === 'idle' ? 'var(--muted)' : 'var(--text)';
+    el.stateLine.textContent = UI.phaseLabel(st, now);
+    el.clockCard.classList.toggle('late-bg', phase === 'late');
+
+    var pct = Math.max(0, Math.min(100, (R.elapsedSec(st, now) / R.totalSec(st)) * 100));
+    el.bar.style.width = (st.status === 'idle' ? 0 : pct) + '%';
+    el.bar.style.background = rem < 0 ? 'var(--late)' : rem <= 120 ? 'var(--warn)' : 'var(--ok)';
+
+    el.mainBtn.textContent = st.status === 'idle' ? '▶ เริ่มจับเวลา'
+      : st.status === 'paused' ? '▶ ทำต่อ'
+      : st.status === 'done' ? '▶ เริ่มรอบใหม่ที่ฐานนี้'
+      : '✔ เสร็จแล้ว — ส่งกลุ่มต่อ';
+    el.mainBtn.className = (st.status === 'running' ? 'btn-info' : 'btn-primary') + ' btn-lg btn-block';
+    el.pauseBtn.textContent = st.status === 'paused' ? '▶ ทำต่อ' : '⏸ หยุดพัก';
+    el.pauseBtn.disabled = st.status === 'idle' || st.status === 'done';
+    el.helpBtn.textContent = st.help ? '✅ ยกเลิกขอความช่วยเหลือ' : '🆘 ขอความช่วยเหลือ';
+    el.helpBtn.className = st.help ? 'btn-warn' : 'btn-help';
+
+    if (document.activeElement !== el.note && el.note.value !== st.note) el.note.value = st.note;
+
+    // ---- alerts for the person standing at this station ----
+    if (st.status !== lastStatus) {
+      if (st.status === 'idle' || st.status === 'running') alerted = {};
+      lastStatus = st.status;
+    }
+    if (st.status === 'running') {
+      if (rem <= 300 && rem > 290 && !alerted.m5) { alerted.m5 = true; UI.beep(1, 880); UI.toast('เหลืออีก 5 นาที'); }
+      if (rem <= 60 && rem > 50 && !alerted.m1) { alerted.m1 = true; UI.beep(2, 880); UI.toast('เหลืออีก 1 นาที'); }
+      if (rem <= 0 && !alerted.over) { alerted.over = true; UI.beep(3, 440); UI.toast('หมดเวลาแล้ว!'); }
+    }
+
+    // ---- other stations ----
+    var rows = state.stations.map(function (o, i) {
+      if (o.id === st.id) return '';
+      var p = UI.phase(o, now);
+      var r = R.remainingSec(o, now);
+      var cls = p === 'late' ? 'late' : (p === 'done' || p === 'done-late') ? 'done' : 'ok';
+      var text = o.status === 'idle' ? 'ยังไม่เริ่ม'
+        : o.status === 'done' ? 'เสร็จแล้ว'
+        : (r < 0 ? 'เกิน ' + UI.mmss(r) : 'เหลือ ' + UI.mmss(r));
+      return '<li><span style="flex:1">' + escapeHtml(o.name) +
+        (o.help ? ' <span class="tag late">🆘</span>' : '') +
+        (o.note ? '<div class="muted small">' + escapeHtml(o.note) + '</div>' : '') +
+        '</span><span class="tag ' + cls + '">' + escapeHtml(text) + '</span></li>';
+    });
+    el.others.innerHTML = rows.join('') || '<li class="muted">ยังไม่มีฐานอื่น</li>';
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+
+  Store.start();
+  UI.tick(paint);
+})();
+</script>
+</body>
+</html>

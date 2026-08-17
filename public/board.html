@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>จอรวมทุกฐาน · ฐานเวลา</title>
+<meta name="theme-color" content="#0e1117">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⏱</text></svg>">
+</head>
+<body>
+
+<div class="topbar">
+  <h1 id="eventName">ฐานเวลา</h1>
+  <span class="round-pill" id="roundPill">รอบที่ 1</span>
+  <span class="spacer"></span>
+  <span class="conn" id="conn"></span>
+  <button id="soundBtn" title="เปิด/ปิดเสียงเตือน">🔔 เสียง: ปิด</button>
+  <button id="tvBtn" title="ขยายสำหรับจอใหญ่">🖥️ จอใหญ่</button>
+  <a class="btn" href="index.html">เมนู</a>
+</div>
+
+<div id="announce"></div>
+<div class="summary" id="summary"></div>
+<div class="grid" id="grid"></div>
+
+<script src="firebase-config.js"></script>
+<script src="reducer.js"></script>
+<script src="sync-firebase.js"></script>
+<script src="app.js"></script>
+<script>
+(function () {
+  'use strict';
+  var R = window.Reducer;
+  var grid = document.getElementById('grid');
+  var summary = document.getElementById('summary');
+  var announce = document.getElementById('announce');
+  var tiles = {};       // station id -> { root, refs... }
+  var lastPhase = {};   // station id -> phase, for edge-triggered alerts
+  var lastHelp = {};
+  var soundOn = false;
+
+  UI.bindConn(document.getElementById('conn'));
+  UI.keepAwake();
+
+  document.getElementById('soundBtn').addEventListener('click', function () {
+    soundOn = !soundOn;
+    this.textContent = soundOn ? '🔔 เสียง: เปิด' : '🔕 เสียง: ปิด';
+    if (soundOn) UI.beep(1, 660);
+  });
+
+  document.getElementById('tvBtn').addEventListener('click', function () {
+    document.body.classList.toggle('tv');
+    if (document.body.classList.contains('tv') && document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen().catch(function () {});
+    } else if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(function () {});
+    }
+  });
+
+  function buildTile(st) {
+    var root = document.createElement('div');
+    root.className = 'tile';
+    root.innerHTML =
+      '<div class="flag" hidden>ขอความช่วยเหลือ</div>' +
+      '<div class="name"><span class="t-name"></span></div>' +
+      '<div class="group t-group"></div>' +
+      '<div class="clock t-clock">--:--</div>' +
+      '<div class="state t-state"></div>' +
+      '<div class="note t-note"></div>' +
+      '<div class="bar"><i></i></div>';
+    return {
+      root: root,
+      flag: root.querySelector('.flag'),
+      name: root.querySelector('.t-name'),
+      group: root.querySelector('.t-group'),
+      clock: root.querySelector('.t-clock'),
+      state: root.querySelector('.t-state'),
+      note: root.querySelector('.t-note'),
+      bar: root.querySelector('.bar > i')
+    };
+  }
+
+  function syncTiles(state) {
+    var wanted = state.stations.map(function (s) { return s.id; });
+    Object.keys(tiles).forEach(function (id) {
+      if (wanted.indexOf(id) === -1) {
+        tiles[id].root.remove();
+        delete tiles[id];
+      }
+    });
+    state.stations.forEach(function (st, i) {
+      if (!tiles[st.id]) tiles[st.id] = buildTile(st);
+      var node = tiles[st.id].root;
+      // Only touch the DOM when the tile is genuinely out of place — re-appending
+      // every frame would restart the overtime pulse animation.
+      if (grid.children[i] !== node) grid.insertBefore(node, grid.children[i] || null);
+    });
+  }
+
+  function paint(now) {
+    var state = Store.state;
+    if (!state) return;
+
+    document.getElementById('eventName').textContent = state.eventName;
+    document.getElementById('roundPill').textContent = 'รอบที่ ' + state.round;
+
+    var annHtml = state.announcement && state.announcement.text
+      ? '<div class="wrap" style="padding-bottom:0"><div class="banner banner-info">' +
+        '📢 ' + escapeHtml(state.announcement.text) +
+        ' <span class="muted small">(' + UI.clockTime(state.announcement.at) + ')</span></div></div>'
+      : '';
+    if (annHtml !== announce.innerHTML) announce.innerHTML = annHtml;
+
+    syncTiles(state);
+
+    var lateCount = 0, doneCount = 0, runningCount = 0, helpCount = 0;
+    var worst = null, worstSec = 0;
+    var latestEnd = 0, allKnown = true;
+
+    state.stations.forEach(function (st, i) {
+      var t = tiles[st.id];
+      var phase = UI.phase(st, now);
+      var rem = R.remainingSec(st, now);
+
+      t.root.className = 'tile ' + UI.phaseClass(phase) + (st.help ? ' help' : '');
+      t.flag.hidden = !st.help;
+      t.name.textContent = st.name;
+      t.group.textContent = [R.groupAt(state, i), st.staff].filter(Boolean).join(' · ');
+      t.clock.textContent = UI.clockText(st, now);
+      t.state.textContent = UI.phaseLabel(st, now);
+      t.note.textContent = st.note || '';
+
+      var pct = Math.max(0, Math.min(100, (R.elapsedSec(st, now) / R.totalSec(st)) * 100));
+      t.bar.style.width = (st.status === 'idle' ? 0 : pct) + '%';
+
+      if (st.help) helpCount++;
+      if (st.status === 'done') doneCount++;
+      if (st.status === 'running' || st.status === 'paused') runningCount++;
+      if (rem < 0 && st.status !== 'idle') {
+        lateCount++;
+        if (-rem > worstSec) { worstSec = -rem; worst = st; }
+      }
+
+      // projected end of this station's slot
+      if (st.status === 'running') latestEnd = Math.max(latestEnd, now + rem * 1000);
+      else if (st.status === 'done') latestEnd = Math.max(latestEnd, st.finishedAt || now);
+      else allKnown = false;
+
+      // ---- edge-triggered alerts ----
+      if (soundOn) {
+        if (lastPhase[st.id] && lastPhase[st.id] !== 'late' && phase === 'late') UI.beep(3, 440);
+        else if (lastPhase[st.id] && lastPhase[st.id] === 'running' && phase === 'warn') UI.beep(1, 880);
+        if (!lastHelp[st.id] && st.help) UI.beep(2, 1046);
+      }
+      lastPhase[st.id] = phase;
+      lastHelp[st.id] = st.help;
+    });
+
+    var total = state.stations.length;
+    var cards = [];
+    cards.push(stat('ฐานทั้งหมด', total + ' ฐาน', ''));
+    cards.push(stat('เสร็จแล้ว', doneCount + ' / ' + total, doneCount === total ? 'var(--ok)' : ''));
+    cards.push(stat('เกินเวลา', lateCount ? lateCount + ' ฐาน' : '— ไม่มี', lateCount ? 'var(--late)' : 'var(--ok)'));
+    if (worst) cards.push(stat('ช้าที่สุด', worst.name + '  +' + UI.mmss(worstSec), 'var(--late)'));
+    if (helpCount) cards.push(stat('ขอความช่วยเหลือ', helpCount + ' ฐาน', 'var(--help)'));
+    if (runningCount === 0 && doneCount === total && total > 0) {
+      cards.push(stat('สถานะรอบ', 'หมุนฐานได้เลย ✅', 'var(--ok)'));
+    } else if (allKnown && latestEnd > now) {
+      cards.push(stat('น่าจะหมุนได้', UI.clockTime(latestEnd) + ' น.', ''));
+    } else if (state.roundStartedAt) {
+      cards.push(stat('รอบนี้เริ่ม', UI.clockTime(state.roundStartedAt) + ' น.', ''));
+    }
+    summary.innerHTML = cards.join('');
+  }
+
+  function stat(k, v, color) {
+    return '<div class="stat"><div class="k">' + escapeHtml(k) + '</div>' +
+      '<div class="v"' + (color ? ' style="color:' + color + '"' : '') + '>' + escapeHtml(v) + '</div></div>';
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+
+  Store.start();
+  UI.tick(paint);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ฝ่ายกลาง · ฐานเวลา</title>
+<meta name="theme-color" content="#0e1117">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⏱</text></svg>">
+</head>
+<body>
+
+<div class="topbar">
+  <h1>ฝ่ายกลาง / ตั้งค่า</h1>
+  <span class="round-pill" id="roundPill">รอบที่ 1</span>
+  <span class="spacer"></span>
+  <span class="conn" id="conn"></span>
+  <a class="btn" href="board.html">จอรวม</a>
+  <a class="btn" href="index.html">เมนู</a>
+</div>
+
+<div class="wrap">
+
+  <div class="card" id="pinCard" hidden>
+    <h2>PIN ฝ่ายกลาง</h2>
+    <div class="row">
+      <input id="pin" type="password" inputmode="numeric" placeholder="ใส่ PIN" style="flex:3 1 160px">
+      <button id="pinBtn" style="flex:0 0 auto">บันทึก</button>
+    </div>
+    <p class="muted small">ต้องใส่ PIN ก่อนสั่งงานรอบและแก้ไขการตั้งค่า</p>
+  </div>
+
+  <div class="card">
+    <h2>ควบคุมรอบ</h2>
+    <div class="row" style="margin-bottom:10px">
+      <button class="btn-primary btn-lg" id="startAll">▶ เริ่มจับเวลาทุกฐานพร้อมกัน</button>
+    </div>
+    <div class="row">
+      <button class="btn-info" id="nextRound">⟳ หมุนฐาน → รอบถัดไป</button>
+      <button class="btn-warn" id="stopAll">■ ปิดทุกฐาน (จบรอบนี้)</button>
+      <button class="btn-danger" id="resetAll">↺ รีเซ็ตทั้งหมด</button>
+    </div>
+    <p class="muted small" id="roundInfo" style="margin-bottom:0"></p>
+  </div>
+
+  <div class="card">
+    <h2>ประกาศถึงทุกฐาน</h2>
+    <div class="row">
+      <input id="ann" placeholder="เช่น รอบนี้ช้า 10 นาที ทุกฐานตัดเหลือ 15 นาที" maxlength="200" style="flex:3 1 220px">
+      <button class="btn-info" id="annBtn" style="flex:0 0 auto">ส่ง</button>
+      <button id="annClear" style="flex:0 0 auto">ล้าง</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>ชื่อค่าย</h2>
+    <input id="eventName" maxlength="60" placeholder="ค่ายกิจกรรม">
+  </div>
+
+  <div class="card">
+    <h2>ฐานกิจกรรม</h2>
+    <div id="stationRows"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="addStation">+ เพิ่มฐาน</button>
+      <button class="btn-primary" id="saveConfig">💾 บันทึกการตั้งค่า</button>
+    </div>
+    <p class="muted small">การแก้ชื่อ/เวลาไม่ล้างเวลาที่กำลังเดินอยู่ · ลบฐานแล้วต้องกดบันทึก</p>
+  </div>
+
+  <div class="card">
+    <h2>กลุ่มผู้เข้าค่าย (เรียงตามลำดับการหมุน)</h2>
+    <textarea id="groups" rows="6" placeholder="หนึ่งกลุ่มต่อหนึ่งบรรทัด"></textarea>
+    <p class="muted small">รอบที่ 1 กลุ่มแรกอยู่ฐานแรก · แต่ละรอบจะเลื่อนไปฐานถัดไปอัตโนมัติ</p>
+  </div>
+
+</div>
+
+<script src="firebase-config.js"></script>
+<script src="reducer.js"></script>
+<script src="sync-firebase.js"></script>
+<script src="app.js"></script>
+<script>
+(function () {
+  'use strict';
+  var R = window.Reducer;
+  var rowsEl = document.getElementById('stationRows');
+  var draft = null;      // local edit buffer for stations
+  var dirty = false;
+
+  UI.bindConn(document.getElementById('conn'));
+
+  function send(action) {
+    return Store.send(action)
+      .then(function () { UI.toast('เรียบร้อย'); })
+      .catch(function (e) { UI.toast(e.message); });
+  }
+
+  // ---- pin ----
+  var pinInput = document.getElementById('pin');
+  pinInput.value = Store.pin();
+  document.getElementById('pinBtn').addEventListener('click', function () {
+    Store.pin(pinInput.value.trim());
+    UI.toast('บันทึก PIN แล้ว');
+  });
+
+  // ---- round controls ----
+  document.getElementById('startAll').addEventListener('click', function () {
+    if (confirm('เริ่มจับเวลาทุกฐานพร้อมกันตอนนี้?')) send({ type: 'round/startAll' });
+  });
+  document.getElementById('stopAll').addEventListener('click', function () {
+    if (confirm('ปิดทุกฐานที่ยังเดินอยู่?')) send({ type: 'round/stopAll' });
+  });
+  document.getElementById('nextRound').addEventListener('click', function () {
+    if (confirm('ไปรอบถัดไป? เวลาทุกฐานจะถูกล้างและกลุ่มจะเลื่อนฐาน')) send({ type: 'round/next' });
+  });
+  document.getElementById('resetAll').addEventListener('click', function () {
+    if (confirm('รีเซ็ตกลับไปรอบที่ 1 และล้างเวลาทุกฐาน?')) send({ type: 'round/reset' });
+  });
+
+  // ---- announcement ----
+  document.getElementById('annBtn').addEventListener('click', function () {
+    send({ type: 'announce', text: document.getElementById('ann').value });
+  });
+  document.getElementById('annClear').addEventListener('click', function () {
+    document.getElementById('ann').value = '';
+    send({ type: 'announce', text: '' });
+  });
+
+  // ---- station editor ----
+  function rowHtml(st, i) {
+    return '<div class="srow" data-i="' + i + '">' +
+      '<div class="srow-top">' +
+        '<input class="f-name" placeholder="ชื่อฐาน" value="' + attr(st.name) + '">' +
+        '<button class="f-del" title="ลบฐานนี้" aria-label="ลบฐานนี้">✕ ลบ</button>' +
+      '</div>' +
+      '<div class="srow-bot">' +
+        '<input class="f-staff" placeholder="พี่ประจำฐาน (ไม่ใส่ก็ได้)" value="' + attr(st.staff || '') + '">' +
+        '<span class="minbox"><input class="f-min" type="number" min="1" max="600" value="' + attr(st.durationMin) + '"><span>นาที</span></span>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderRows() {
+    rowsEl.innerHTML = draft.map(rowHtml).join('');
+    rowsEl.querySelectorAll('.f-del').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var i = Number(b.closest('[data-i]').dataset.i);
+        harvest();
+        draft.splice(i, 1);
+        dirty = true;
+        renderRows();
+      });
+    });
+    rowsEl.querySelectorAll('input').forEach(function (inp) {
+      inp.addEventListener('input', function () { dirty = true; });
+    });
+  }
+
+  function harvest() {
+    rowsEl.querySelectorAll('[data-i]').forEach(function (row) {
+      var i = Number(row.dataset.i);
+      if (!draft[i]) return;
+      draft[i].name = row.querySelector('.f-name').value;
+      draft[i].staff = row.querySelector('.f-staff').value;
+      draft[i].durationMin = Number(row.querySelector('.f-min').value) || draft[i].durationMin;
+    });
+  }
+
+  document.getElementById('addStation').addEventListener('click', function () {
+    harvest();
+    draft.push({ id: '', name: 'ฐานใหม่', staff: '', durationMin: 20 });
+    dirty = true;
+    renderRows();
+  });
+
+  document.getElementById('saveConfig').addEventListener('click', function () {
+    harvest();
+    var groups = document.getElementById('groups').value.split('\n')
+      .map(function (s) { return s.trim(); }).filter(Boolean);
+    send({
+      type: 'config/save',
+      eventName: document.getElementById('eventName').value,
+      groups: groups,
+      stations: draft
+    }).then(function () { dirty = false; });
+  });
+
+  document.getElementById('eventName').addEventListener('input', function () { dirty = true; });
+  document.getElementById('groups').addEventListener('input', function () { dirty = true; });
+
+  function attr(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c];
+    });
+  }
+
+  Store.subscribe(function (state) {
+    document.getElementById('roundPill').textContent = 'รอบที่ ' + state.round;
+    document.getElementById('pinCard').hidden = !Store.pinRequired;
+
+    var running = state.stations.filter(function (s) { return s.status === 'running'; }).length;
+    var done = state.stations.filter(function (s) { return s.status === 'done'; }).length;
+    document.getElementById('roundInfo').textContent =
+      'กำลังเดิน ' + running + ' ฐาน · เสร็จแล้ว ' + done + ' / ' + state.stations.length +
+      (state.roundStartedAt ? ' · รอบนี้เริ่ม ' + UI.clockTime(state.roundStartedAt) + ' น.' : '');
+
+    // Do not stomp on edits in progress.
+    if (dirty) return;
+    document.getElementById('eventName').value = state.eventName;
+    document.getElementById('groups').value = state.groups.join('\n');
+    document.getElementById('ann').value = (state.announcement && state.announcement.text) || '';
+    draft = state.stations.map(function (s) {
+      return { id: s.id, name: s.name, staff: s.staff, durationMin: s.durationMin };
+    });
+    renderRows();
+  });
+
+  Store.start();
+})();
+</script>
+</body>
+</html>
